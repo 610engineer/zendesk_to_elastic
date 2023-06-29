@@ -14,13 +14,17 @@ creds = {
     }
 
 def main():
-
     
     # Zenpy instance
     zenpy_client = Zenpy(**creds)
 
-    tickets = zenpy_client.tickets()
+    tickets = zenpy_client.search(type='ticket' , status="closed")
     for ticket in tickets:
+
+        # Elasticsearchにすでにチケット情報が存在している場合はスキップ
+        if(search_document(ticket.id) == True):
+            continue
+
         # チケット情報をdict型に変換
         ticket_data = ticket.to_dict()
 
@@ -28,7 +32,7 @@ def main():
 
         # チケットIDからチャット履歴を取得
         for comment in zenpy_client.tickets.comments(ticket = ticket.id):
-
+            
             # チャットデータをdict型へ変換
             comment_data = comment.to_dict()
 
@@ -51,6 +55,8 @@ def main():
         # Elasticsearchへチケット情報を登録
         insert_elasticsearch(ticket_json)
 
+
+# Elasticsearchにチケット情報を登録する
 def insert_elasticsearch(json_data):
 
     # エンドポイントを設定
@@ -62,6 +68,31 @@ def insert_elasticsearch(json_data):
     
     # エンドポイントとの接続をクローズ
     es.close()
+
+# チケットIDを検索し、インデックスに存在する場合はTrue、ない場合はFlaseを返す
+def search_document(docId):
+    # エンドポイントを設定
+    es = Elasticsearch(os.environ.get('ELASTICSEARCH_URL'))
+    
+    # indexの存在確認
+    exist = es.indices.exists(index = "zen_test")
+
+    # indexがない場合は作成
+    if(exist == False):
+        es.indices.create(index = "zen_test")
+
+    # 検索クエリ作成
+    query = {"query": {"match": {"id": docId}}}
+
+    # _sourceから対象のidを検索
+    search_result = es.search(index= "zen_test", body = query)
+
+    # idが存在すればTrue、ない場合はFalseを返す
+    if(search_result["hits"]["total"]["value"] == 0):
+        return False
+    else:
+        return True
+
 
 if __name__ == "__main__":
     main()
